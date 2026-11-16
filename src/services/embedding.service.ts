@@ -8,6 +8,10 @@ export const EMBEDDING_DIMENSIONS = 768;
 
 // The Gemini API accepts at most 100 texts per embedContent request.
 const BATCH_SIZE = 100;
+const EMBED_TIMEOUT_MS = 30_000;
+
+// Stored chunks and search questions use matching task types so their vectors compare well.
+type EmbeddingTask = "RETRIEVAL_DOCUMENT" | "QUESTION_ANSWERING";
 
 export interface EmbeddingOptions {
   apiKey: string;
@@ -32,7 +36,17 @@ export class EmbeddingService {
   }
 
   /** Embeds texts for storage and later retrieval; returns one vector per text, in order. */
-  async embedDocuments(texts: string[]): Promise<number[][]> {
+  embedDocuments(texts: string[]): Promise<number[][]> {
+    return this.embed(texts, "RETRIEVAL_DOCUMENT");
+  }
+
+  /** Embeds a search question, to compare against stored chunk embeddings. */
+  async embedQuery(question: string): Promise<number[]> {
+    const [vector] = await this.embed([question], "QUESTION_ANSWERING");
+    return vector;
+  }
+
+  private async embed(texts: string[], taskType: EmbeddingTask): Promise<number[][]> {
     if (!this.client) {
       throw new HttpError(
         "Embedding is unavailable: GEMINI_API_KEY is not set on the server",
@@ -48,7 +62,11 @@ export class EmbeddingService {
         ({ embeddings } = await this.client.models.embedContent({
           model: this.options.model,
           contents: batch,
-          config: { taskType: "RETRIEVAL_DOCUMENT", outputDimensionality: EMBEDDING_DIMENSIONS },
+          config: {
+            taskType,
+            outputDimensionality: EMBEDDING_DIMENSIONS,
+            abortSignal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
+          },
         }));
       } catch (err) {
         throw new HttpError("Embedding the text with Gemini failed", StatusCodes.BAD_GATEWAY, {

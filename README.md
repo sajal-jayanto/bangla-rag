@@ -42,19 +42,21 @@ tesseract --list-langs   # should list ben and eng
 cp .env.example .env
 ```
 
-| Variable                 | Required    | Default                | Description                                                             |
-| ------------------------ | ----------- | ---------------------- | ----------------------------------------------------------------------- |
-| `PORT`                   | no          | `3000`                 | Port the API listens on                                                 |
-| `NODE_ENV`               | no          | `development`          | `development` includes stack traces in errors                           |
-| `DATABASE_URL`           | **yes**     | —                      | Postgres connection string (used by `npm run dev`)                      |
-| `POSTGRES_USER`          | Docker      | `bangla_rag`           | User for the Docker Postgres container                                  |
-| `POSTGRES_PASSWORD`      | Docker      | —                      | Password for the Docker Postgres container                              |
-| `POSTGRES_DB`            | Docker      | `bangla_rag`           | Database name                                                           |
-| `POSTGRES_PORT`          | no          | `5432`                 | Host port for the Docker Postgres container                             |
-| `GEMINI_API_KEY`         | for uploads | —                      | Gemini API key used to embed OCR text (uploads return `503` without it) |
-| `GEMINI_EMBEDDING_MODEL` | no          | `gemini-embedding-001` | Gemini embedding model                                                  |
-| `JWT_SECRET`             | **yes**     | —                      | Signing secret, **at least 32 characters**                              |
-| `JWT_EXPIRES_IN`         | no          | `1h`                   | Token lifetime (e.g. `15m`, `1h`, `7d`)                                 |
+| Variable                 | Required    | Default                | Description                                                               |
+| ------------------------ | ----------- | ---------------------- | ------------------------------------------------------------------------- |
+| `PORT`                   | no          | `3000`                 | Port the API listens on                                                   |
+| `NODE_ENV`               | no          | `development`          | `development` includes stack traces in errors                             |
+| `DATABASE_URL`           | **yes**     | —                      | Postgres connection string (used by `npm run dev`)                        |
+| `POSTGRES_USER`          | Docker      | `bangla_rag`           | User for the Docker Postgres container                                    |
+| `POSTGRES_PASSWORD`      | Docker      | —                      | Password for the Docker Postgres container                                |
+| `POSTGRES_DB`            | Docker      | `bangla_rag`           | Database name                                                             |
+| `POSTGRES_PORT`          | no          | `5432`                 | Host port for the Docker Postgres container                               |
+| `GEMINI_API_KEY`         | for uploads | —                      | Gemini API key used to embed OCR text (uploads return `503` without it)   |
+| `GEMINI_EMBEDDING_MODEL` | no          | `gemini-embedding-001` | Gemini embedding model                                                    |
+| `GEMINI_CHAT_MODEL`      | no          | `gemini-3.5-flash`     | Gemini model that writes search answers                                   |
+| `SEARCH_MIN_SIMILARITY`  | no          | `0.6`                  | Cosine similarity (0–1) a chunk needs to count as related to the question |
+| `JWT_SECRET`             | **yes**     | —                      | Signing secret, **at least 32 characters**                                |
+| `JWT_EXPIRES_IN`         | no          | `1h`                   | Token lifetime (e.g. `15m`, `1h`, `7d`)                                   |
 
 Generate a strong secret with:
 
@@ -81,20 +83,21 @@ Postgres is bound to `127.0.0.1` only and its data lives in the `pg-data` volume
 
 ## API
 
-| Method | Path                          | Auth | Description                                  |
-| ------ | ----------------------------- | ---- | -------------------------------------------- |
-| GET    | `/health`                     | —    | Liveness check                               |
-| POST   | `/api/auth/register`          | —    | `{ name, email, password }` → user + token   |
-| POST   | `/api/auth/login`             | —    | `{ email, password }` → user + token         |
-| GET    | `/api/users/me`               | JWT  | Current user                                 |
-| GET    | `/api/dashboard`              | JWT  | User and DB info                             |
-| GET    | `/api/projects`               | JWT  | Your projects, newest first                  |
-| POST   | `/api/projects`               | JWT  | Create a project                             |
-| GET    | `/api/projects/:id`           | JWT  | One of your projects                         |
-| PATCH  | `/api/projects/:id`           | JWT  | Update a project                             |
-| DELETE | `/api/projects/:id`           | JWT  | Soft-delete a project (`204`)                |
-| POST   | `/api/projects/:id/ocr`       | JWT  | OCR + embed a PDF or image, returns metadata |
-| GET    | `/api/projects/:id/documents` | JWT  | Metadata of files uploaded to the project    |
+| Method | Path                          | Auth | Description                                                        |
+| ------ | ----------------------------- | ---- | ------------------------------------------------------------------ |
+| GET    | `/health`                     | —    | Liveness check                                                     |
+| POST   | `/api/auth/register`          | —    | `{ name, email, password }` → user + token                         |
+| POST   | `/api/auth/login`             | —    | `{ email, password }` → user + token                               |
+| GET    | `/api/users/me`               | JWT  | Current user                                                       |
+| GET    | `/api/dashboard`              | JWT  | User and DB info                                                   |
+| GET    | `/api/projects`               | JWT  | Your projects, newest first                                        |
+| POST   | `/api/projects`               | JWT  | Create a project                                                   |
+| GET    | `/api/projects/:id`           | JWT  | One of your projects                                               |
+| PATCH  | `/api/projects/:id`           | JWT  | Update a project                                                   |
+| DELETE | `/api/projects/:id`           | JWT  | Soft-delete a project (`204`)                                      |
+| POST   | `/api/projects/:id/ocr`       | JWT  | OCR + embed a PDF or image, returns metadata                       |
+| GET    | `/api/projects/:id/documents` | JWT  | Metadata of files uploaded to the project                          |
+| POST   | `/api/projects/:id/search`    | JWT  | Ask a question; answers from the project's documents or `জানা নেই` |
 
 Authenticated routes expect an `Authorization: Bearer <token>` header.
 
@@ -164,6 +167,41 @@ curl -X POST http://localhost:3000/api/projects/5/ocr \
 - `503` if `tesseract` or Poppler is not installed, or `GEMINI_API_KEY` is not set; `502` if the Gemini API call fails; `422` if the file can't be read (corrupt or encrypted PDF). A failed OCR or embedding is still recorded (with no chunks), with `ocrStatus: "failed"` and the reason in `ocrError`; rejected uploads (`413`, `415`, `404`) are not.
 - `pdfInfo` holds the PDF's own properties when set (title, subject, author, creator, producer, creation/modification date, page size, PDF version, encrypted). It is `null` for images.
 - Bangla file names are kept as-is.
+
+### Search
+
+`POST /api/projects/:id/search` answers a question (Bangla or English) from the documents uploaded to that project.
+
+```bash
+curl -X POST http://localhost:3000/api/projects/5/search \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{ "query": "পদ্মা সেতুর দৈর্ঘ্য কত?" }'
+```
+
+```json
+{
+  "query": "পদ্মা সেতুর দৈর্ঘ্য কত?",
+  "found": true,
+  "answer": "৬.১৫ কিলোমিটার।",
+  "sources": [
+    {
+      "documentId": "13",
+      "fileName": "dhaka.png",
+      "pageNumber": null,
+      "chunkIndex": 0,
+      "similarity": 0.6589,
+      "content": "..."
+    }
+  ]
+}
+```
+
+1. The question is embedded with Gemini (`QUESTION_ANSWERING`, 768 dimensions).
+2. The project's `limit` (default 5, max 20) nearest chunks are found by cosine similarity; those below `SEARCH_MIN_SIMILARITY` (0.6) are dropped.
+3. If none are left, the answer is **`জানা নেই`** ("not known") and Gemini is not called.
+4. Otherwise Gemini answers using **only** those chunks, in Bangla, and replies `জানা নেই` if they don't contain the answer.
+
+When the answer is `জানা নেই`, `found` is `false` and `sources` is empty. `404` for a project that isn't yours; `502` / `504` if Gemini fails or takes over 30 s.
 
 ## Database schema
 

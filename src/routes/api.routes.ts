@@ -10,17 +10,22 @@ import { AuthController } from "../controllers/auth.controller.js";
 import { DashboardController } from "../controllers/dashboard.controller.js";
 import { ProjectController } from "../controllers/project.controller.js";
 import { DocumentController } from "../controllers/document.controller.js";
+import { SearchController } from "../controllers/search.controller.js";
 import { AuthService } from "../services/auth.service.js";
 import { DashboardService } from "../services/dashboard.service.js";
 import { ProjectService } from "../services/project.service.js";
 import { OcrService } from "../services/ocr.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
+import { AnswerService } from "../services/answer.service.js";
+import { SearchService } from "../services/search.service.js";
 import { DocumentService } from "../services/document.service.js";
 import { UserRepository } from "../repositories/user.repository.js";
 import { DashboardRepository } from "../repositories/dashboard.repository.js";
 import { ProjectRepository } from "../repositories/project.repository.js";
 import { DocumentRepository } from "../repositories/document.repository.js";
+import { ChunkRepository } from "../repositories/chunk.repository.js";
 import { loginSchema, registerSchema } from "../validators/auth.validator.js";
+import { searchSchema } from "../validators/search.validator.js";
 import {
   createProjectSchema,
   projectIdParamsSchema,
@@ -31,6 +36,7 @@ const userRepository = new UserRepository(pool);
 const dashboardRepository = new DashboardRepository(pool);
 const projectRepository = new ProjectRepository(pool);
 const documentRepository = new DocumentRepository(pool);
+const chunkRepository = new ChunkRepository(pool);
 
 const authService = new AuthService(userRepository);
 const authController = new AuthController(authService);
@@ -53,6 +59,16 @@ const documentService = new DocumentService(
   embeddingService,
 );
 const documentController = new DocumentController(documentService);
+
+const answerService = new AnswerService({ apiKey: env.gemini.apiKey, model: env.gemini.chatModel });
+const searchService = new SearchService(
+  projectService,
+  chunkRepository,
+  embeddingService,
+  answerService,
+  { minSimilarity: env.search.minSimilarity },
+);
+const searchController = new SearchController(searchService);
 
 const apiRouter = Router();
 
@@ -86,6 +102,14 @@ apiRouter.group("/projects", [authenticate], (router) => {
   // OCR a PDF or image (multipart field `file`, max 5 MB), embed the text and save it as chunks.
   router.post("/:id/ocr", validId, uploadSingleFile, asyncHandler(documentController.ocr));
   router.get("/:id/documents", validId, asyncHandler(documentController.list));
+
+  // Answer a question from the project's documents, or "জানা নেই" if they don't say.
+  router.post(
+    "/:id/search",
+    validId,
+    validateBody(searchSchema),
+    asyncHandler(searchController.search),
+  );
 });
 
 export default apiRouter;

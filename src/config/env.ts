@@ -18,12 +18,21 @@ export const env = {
     // Optional at startup so the rest of the API runs without it; uploads answer 503 instead.
     apiKey: process.env.GEMINI_API_KEY ?? "",
     embeddingModel: process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001",
+    chatModel: process.env.GEMINI_CHAT_MODEL ?? "gemini-3.5-flash",
+  },
+  search: {
+    // Cosine similarity a chunk needs to count as related to the question (0–1).
+    minSimilarity: Number(process.env.SEARCH_MIN_SIMILARITY ?? 0.6),
   },
   jwt: {
     secret: required("JWT_SECRET"),
     expiresIn: process.env.JWT_EXPIRES_IN ?? "1h",
   },
 } as const;
+
+if (!(env.search.minSimilarity >= 0 && env.search.minSimilarity <= 1)) {
+  throw new Error("SEARCH_MIN_SIMILARITY must be a number between 0 and 1");
+}
 
 if (env.jwt.secret.length < 32) {
   throw new Error("JWT_SECRET must be at least 32 characters long");

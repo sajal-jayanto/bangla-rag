@@ -3,6 +3,7 @@ import { StatusCodes } from "http-status-codes";
 
 import { HttpError } from "../middlewares/error.middleware.js";
 import type { DocumentRow } from "../models/document.model.js";
+import { toVectorLiteral } from "./chunk.repository.js";
 
 export type CreateDocumentData = Omit<DocumentRow, "id" | "created_at">;
 
@@ -40,9 +41,6 @@ const documentValues = (data: CreateDocumentData): unknown[] => [
   data.chunk_count,
   data.embedding_model,
 ];
-
-/** pgvector's text form: `[0.1,0.2,...]`. */
-const toVectorLiteral = (values: number[]): string => `[${values.join(",")}]`;
 
 // Ownership is checked by the caller through the project (see DocumentService).
 export class DocumentRepository {
