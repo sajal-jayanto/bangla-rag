@@ -14,6 +14,11 @@ export const env = {
   db: {
     url: required("DATABASE_URL"),
   },
+  gemini: {
+    // Optional at startup so the rest of the API runs without it; uploads answer 503 instead.
+    apiKey: process.env.GEMINI_API_KEY ?? "",
+    embeddingModel: process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001",
+  },
   jwt: {
     secret: required("JWT_SECRET"),
     expiresIn: process.env.JWT_EXPIRES_IN ?? "1h",

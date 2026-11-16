@@ -3,7 +3,7 @@ import type { OcrFileKind, PdfInfo } from "../services/ocr.service.js";
 export const OCR_STATUSES = ["completed", "failed"] as const;
 export type OcrStatus = (typeof OCR_STATUSES)[number];
 
-/** Metadata of an uploaded file. The file and its OCR text are never stored. */
+/** Metadata of an uploaded file. The file itself is never stored; its text lives in `chunks`. */
 export interface DocumentRow {
   id: string;
   project_id: string;
@@ -20,6 +20,8 @@ export interface DocumentRow {
   ocr_status: OcrStatus;
   ocr_error: string | null;
   ocr_duration_ms: number;
+  chunk_count: number | null;
+  embedding_model: string | null;
   created_at: Date;
 }
 
@@ -39,7 +41,8 @@ export interface DocumentMetadata {
   ocrStatus: OcrStatus;
   ocrError: string | null;
   ocrDurationMs: number;
-  createdAt: Date;
+  chunkCount: number | null;
+  embeddingModel: string | null;
 }
 
 export const toDocumentMetadata = (row: DocumentRow): DocumentMetadata => ({
@@ -58,5 +61,6 @@ export const toDocumentMetadata = (row: DocumentRow): DocumentMetadata => ({
   ocrStatus: row.ocr_status,
   ocrError: row.ocr_error,
   ocrDurationMs: row.ocr_duration_ms,
-  createdAt: row.created_at,
+  chunkCount: row.chunk_count,
+  embeddingModel: row.embedding_model,
 });

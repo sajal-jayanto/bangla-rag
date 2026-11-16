@@ -3,7 +3,13 @@ import { StatusCodes } from "http-status-codes";
 
 import { HttpError } from "../middlewares/error.middleware.js";
 import { toDocumentMetadata, type DocumentMetadata } from "../models/document.model.js";
-import type { DocumentRepository } from "../repositories/document.repository.js";
+import type {
+  CreateDocumentData,
+  DocumentRepository,
+  NewChunk,
+} from "../repositories/document.repository.js";
+import { chunkText } from "../utils/chunkText.js";
+import type { EmbeddingService } from "./embedding.service.js";
 import {
   detectFileKind,
   UNSUPPORTED_FILE_MESSAGE,
@@ -22,22 +28,40 @@ export interface UploadedFile {
 
 export interface OcrUploadResult {
   document: DocumentMetadata;
-  ocr: OcrResult;
+  /** True when the PDF had more pages than were OCR'd. */
+  truncated: boolean;
 }
 
 const MAX_FILE_NAME_LENGTH = 255;
+
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Chunks each page separately so every chunk keeps the page it came from. */
+export const buildChunks = (
+  ocr: Pick<OcrResult, "kind" | "pageTexts">,
+): Omit<NewChunk, "embedding">[] =>
+  ocr.pageTexts
+    .flatMap((pageText, i) =>
+      chunkText(pageText).map((content) => ({
+        pageNumber: ocr.kind === "pdf" ? i + 1 : null,
+        content,
+      })),
+    )
+    .map((chunk, chunkIndex) => ({ ...chunk, chunkIndex }));
 
 export class DocumentService {
   constructor(
     private readonly projectService: ProjectService,
     private readonly documentRepository: DocumentRepository,
     private readonly ocrService: OcrService,
+    private readonly embeddingService: EmbeddingService,
   ) {}
 
   /**
-   * OCRs an uploaded file and saves only its metadata. The file and the text are not stored.
-   * A file whose OCR fails is still recorded, with `ocr_status = 'failed'`, before the error is
-   * returned to the client.
+   * OCRs an uploaded file, splits the text into chunks, embeds them with Gemini and saves the
+   * document metadata and chunks together. The file itself is not stored.
+   * If OCR or embedding fails, the document is still recorded with `ocr_status = 'failed'` (and
+   * no chunks) before the error is returned to the client.
    */
   async ocrUpload(
     ownerId: string,
@@ -52,7 +76,9 @@ export class DocumentService {
       throw new HttpError(UNSUPPORTED_FILE_MESSAGE, StatusCodes.UNSUPPORTED_MEDIA_TYPE);
     }
 
-    const base = {
+    const started = performance.now();
+    const elapsed = () => Math.round(performance.now() - started);
+    const base: CreateDocumentData = {
       project_id: projectId,
       uploaded_by: ownerId,
       file_name: file.originalname.slice(0, MAX_FILE_NAME_LENGTH) || "untitled",
@@ -60,49 +86,70 @@ export class DocumentService {
       size_bytes: file.size,
       sha256: createHash("sha256").update(file.buffer).digest("hex"),
       kind,
+      page_count: null,
+      pages_processed: null,
+      text_length: null,
+      pdf_info: null,
+      ocr_status: "failed",
+      ocr_error: null,
+      ocr_duration_ms: 0,
+      chunk_count: null,
+      embedding_model: null,
     };
 
-    const started = performance.now();
     let ocr: OcrResult;
     try {
       ocr = await this.ocrService.extractText(file.buffer);
     } catch (err) {
       await this.documentRepository.create({
         ...base,
-        page_count: null,
-        pages_processed: null,
-        text_length: null,
-        pdf_info: null,
-        ocr_status: "failed",
-        ocr_error: err instanceof Error ? err.message : String(err),
-        ocr_duration_ms: Math.round(performance.now() - started),
+        ocr_error: errorMessage(err),
+        ocr_duration_ms: elapsed(),
       });
       throw err;
     }
 
-    const row = await this.documentRepository.create({
-      ...base,
+    const ocrFields = {
       page_count: ocr.totalPages,
       pages_processed: ocr.pages,
       text_length: ocr.text.length,
       pdf_info: ocr.pdfInfo ?? null,
-      ocr_status: "completed",
-      ocr_error: null,
-      ocr_duration_ms: Math.round(performance.now() - started),
-    });
-    return { document: toDocumentMetadata(row), ocr };
+    };
+    const pieces = buildChunks(ocr);
+
+    let embeddings: number[][];
+    try {
+      embeddings =
+        pieces.length > 0
+          ? await this.embeddingService.embedDocuments(pieces.map((p) => p.content))
+          : [];
+    } catch (err) {
+      await this.documentRepository.create({
+        ...base,
+        ...ocrFields,
+        ocr_error: `Embedding failed: ${errorMessage(err)}`,
+        ocr_duration_ms: elapsed(),
+      });
+      throw err;
+    }
+
+    const row = await this.documentRepository.createWithChunks(
+      {
+        ...base,
+        ...ocrFields,
+        ocr_status: "completed",
+        ocr_duration_ms: elapsed(),
+        chunk_count: pieces.length,
+        embedding_model: this.embeddingService.model,
+      },
+      pieces.map((piece, i) => ({ ...piece, embedding: embeddings[i] })),
+    );
+    return { document: toDocumentMetadata(row), truncated: ocr.truncated };
   }
 
   async listByProject(ownerId: string, projectId: string): Promise<DocumentMetadata[]> {
     await this.projectService.get(ownerId, projectId);
     const rows = await this.documentRepository.findAllByProject(projectId);
     return rows.map(toDocumentMetadata);
-  }
-
-  async get(ownerId: string, projectId: string, documentId: string): Promise<DocumentMetadata> {
-    await this.projectService.get(ownerId, projectId);
-    const row = await this.documentRepository.findById(projectId, documentId);
-    if (!row) throw new HttpError("Document not found", StatusCodes.NOT_FOUND);
-    return toDocumentMetadata(row);
   }
 }

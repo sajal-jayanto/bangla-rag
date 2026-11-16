@@ -42,17 +42,19 @@ tesseract --list-langs   # should list ben and eng
 cp .env.example .env
 ```
 
-| Variable            | Required | Default       | Description                                        |
-| ------------------- | -------- | ------------- | -------------------------------------------------- |
-| `PORT`              | no       | `3000`        | Port the API listens on                            |
-| `NODE_ENV`          | no       | `development` | `development` includes stack traces in errors      |
-| `DATABASE_URL`      | **yes**  | —             | Postgres connection string (used by `npm run dev`) |
-| `POSTGRES_USER`     | Docker   | `bangla_rag`  | User for the Docker Postgres container             |
-| `POSTGRES_PASSWORD` | Docker   | —             | Password for the Docker Postgres container         |
-| `POSTGRES_DB`       | Docker   | `bangla_rag`  | Database name                                      |
-| `POSTGRES_PORT`     | no       | `5432`        | Host port for the Docker Postgres container        |
-| `JWT_SECRET`        | **yes**  | —             | Signing secret, **at least 32 characters**         |
-| `JWT_EXPIRES_IN`    | no       | `1h`          | Token lifetime (e.g. `15m`, `1h`, `7d`)            |
+| Variable                 | Required    | Default                | Description                                                             |
+| ------------------------ | ----------- | ---------------------- | ----------------------------------------------------------------------- |
+| `PORT`                   | no          | `3000`                 | Port the API listens on                                                 |
+| `NODE_ENV`               | no          | `development`          | `development` includes stack traces in errors                           |
+| `DATABASE_URL`           | **yes**     | —                      | Postgres connection string (used by `npm run dev`)                      |
+| `POSTGRES_USER`          | Docker      | `bangla_rag`           | User for the Docker Postgres container                                  |
+| `POSTGRES_PASSWORD`      | Docker      | —                      | Password for the Docker Postgres container                              |
+| `POSTGRES_DB`            | Docker      | `bangla_rag`           | Database name                                                           |
+| `POSTGRES_PORT`          | no          | `5432`                 | Host port for the Docker Postgres container                             |
+| `GEMINI_API_KEY`         | for uploads | —                      | Gemini API key used to embed OCR text (uploads return `503` without it) |
+| `GEMINI_EMBEDDING_MODEL` | no          | `gemini-embedding-001` | Gemini embedding model                                                  |
+| `JWT_SECRET`             | **yes**     | —                      | Signing secret, **at least 32 characters**                              |
+| `JWT_EXPIRES_IN`         | no          | `1h`                   | Token lifetime (e.g. `15m`, `1h`, `7d`)                                 |
 
 Generate a strong secret with:
 
@@ -79,21 +81,20 @@ Postgres is bound to `127.0.0.1` only and its data lives in the `pg-data` volume
 
 ## API
 
-| Method | Path                                      | Auth | Description                                |
-| ------ | ----------------------------------------- | ---- | ------------------------------------------ |
-| GET    | `/health`                                 | —    | Liveness check                             |
-| POST   | `/api/auth/register`                      | —    | `{ name, email, password }` → user + token |
-| POST   | `/api/auth/login`                         | —    | `{ email, password }` → user + token       |
-| GET    | `/api/users/me`                           | JWT  | Current user                               |
-| GET    | `/api/dashboard`                          | JWT  | User and DB info                           |
-| GET    | `/api/projects`                           | JWT  | Your projects, newest first                |
-| POST   | `/api/projects`                           | JWT  | Create a project                           |
-| GET    | `/api/projects/:id`                       | JWT  | One of your projects                       |
-| PATCH  | `/api/projects/:id`                       | JWT  | Update a project                           |
-| DELETE | `/api/projects/:id`                       | JWT  | Soft-delete a project (`204`)              |
-| POST   | `/api/projects/:id/ocr`                   | JWT  | OCR an uploaded PDF or image, returns text |
-| GET    | `/api/projects/:id/documents`             | JWT  | Metadata of files uploaded to the project  |
-| GET    | `/api/projects/:id/documents/:documentId` | JWT  | Metadata of one uploaded file              |
+| Method | Path                          | Auth | Description                                  |
+| ------ | ----------------------------- | ---- | -------------------------------------------- |
+| GET    | `/health`                     | —    | Liveness check                               |
+| POST   | `/api/auth/register`          | —    | `{ name, email, password }` → user + token   |
+| POST   | `/api/auth/login`             | —    | `{ email, password }` → user + token         |
+| GET    | `/api/users/me`               | JWT  | Current user                                 |
+| GET    | `/api/dashboard`              | JWT  | User and DB info                             |
+| GET    | `/api/projects`               | JWT  | Your projects, newest first                  |
+| POST   | `/api/projects`               | JWT  | Create a project                             |
+| GET    | `/api/projects/:id`           | JWT  | One of your projects                         |
+| PATCH  | `/api/projects/:id`           | JWT  | Update a project                             |
+| DELETE | `/api/projects/:id`           | JWT  | Soft-delete a project (`204`)                |
+| POST   | `/api/projects/:id/ocr`       | JWT  | OCR + embed a PDF or image, returns metadata |
+| GET    | `/api/projects/:id/documents` | JWT  | Metadata of files uploaded to the project    |
 
 Authenticated routes expect an `Authorization: Bearer <token>` header.
 
@@ -112,7 +113,14 @@ The `slug` is generated from the name on create (Bangla text is kept, e.g. `আ�
 
 ### OCR
 
-`POST /api/projects/:id/ocr` takes `multipart/form-data` with one file in the field `file`, and returns the text Tesseract reads from it (Bangla + English) with `201`. The file is held in memory only and is never stored, and neither is the text: only the file's **metadata** is saved to the `documents` table.
+`POST /api/projects/:id/ocr` takes `multipart/form-data` with one file in the field `file`. The server:
+
+1. OCRs it with Tesseract (Bangla + English);
+2. splits the text into chunks of up to ~1000 characters (150 overlap), page by page, breaking at sentence ends (`।`, `.`, `?`, `!`) where possible;
+3. embeds each chunk with Gemini (`gemini-embedding-001`, 768 dimensions, `RETRIEVAL_DOCUMENT`);
+4. saves the document metadata and the chunks (text, page number, embedding) in one transaction.
+
+It answers `201` with the processing result (the document metadata), **not** the text. The uploaded file itself is held in memory only and never stored.
 
 ```bash
 curl -X POST http://localhost:3000/api/projects/5/ocr \
@@ -141,10 +149,11 @@ curl -X POST http://localhost:3000/api/projects/5/ocr \
     },
     "ocrStatus": "completed",
     "ocrError": null,
-    "ocrDurationMs": 461,
+    "ocrDurationMs": 1291,
+    "chunkCount": 2,
+    "embeddingModel": "gemini-embedding-001",
     "createdAt": "2026-11-16T08:43:03.583Z"
   },
-  "text": "...",
   "truncated": false
 }
 ```
@@ -152,7 +161,7 @@ curl -X POST http://localhost:3000/api/projects/5/ocr \
 - Accepted: **PDF, PNG and JPG/JPEG** only; the file content is checked, not just the extension or type (`415` otherwise).
 - Max **5 MB** (`413` if larger). PDFs are OCR'd up to the first 20 pages at 300 DPI; `truncated` is `true` when there were more.
 - The project must be one of yours and not deleted (`404` otherwise).
-- `503` if `tesseract` or Poppler is not installed on the server; `422` if the file can't be read (corrupt or encrypted PDF). A failed OCR is still recorded, with `ocrStatus: "failed"` and the reason in `ocrError`; rejected uploads (`413`, `415`, `404`) are not.
+- `503` if `tesseract` or Poppler is not installed, or `GEMINI_API_KEY` is not set; `502` if the Gemini API call fails; `422` if the file can't be read (corrupt or encrypted PDF). A failed OCR or embedding is still recorded (with no chunks), with `ocrStatus: "failed"` and the reason in `ocrError`; rejected uploads (`413`, `415`, `404`) are not.
 - `pdfInfo` holds the PDF's own properties when set (title, subject, author, creator, producer, creation/modification date, page size, PDF version, encrypted). It is `null` for images.
 - Bangla file names are kept as-is.
 
@@ -160,7 +169,8 @@ curl -X POST http://localhost:3000/api/projects/5/ocr \
 
 - `users` — accounts, unique case-insensitive email, `user` / `admin` role
 - `projects` — owned by a user; `slug` unique per owner among non-deleted projects; soft-deleted via the `is_deleted` boolean
-- `documents` — metadata of each file uploaded to a project for OCR (name, type, size, SHA-256, pages, text length, PDF properties, OCR status and duration); the file and its text are not stored
+- `documents` — metadata of each file uploaded to a project (name, type, size, SHA-256, pages, text length, PDF properties, OCR status and duration, chunk count, embedding model); the file itself is not stored
+- `chunks` — OCR text chunks of a document with page number and a `vector(768)` Gemini embedding, HNSW cosine index
 - `schema_migrations` — applied migration ids
 
 Migrations are plain SQL files in [migrations/](migrations/), applied in filename order by [src/db/migrate.ts](src/db/migrate.ts). Each file runs in its own transaction and its name (without `.sql`) is recorded in `schema_migrations`. To change the schema, run `npm run migrate:create -- add_tags` (creates e.g. `002_add_tags.sql`), write the SQL, then `npm run migrate`; never edit one that has already run.

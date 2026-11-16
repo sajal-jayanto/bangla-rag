@@ -15,7 +15,10 @@ export interface OcrResult {
   /** Pages in the PDF; more than `pages` when the PDF was longer than the page limit. */
   totalPages: number;
   truncated: boolean;
+  /** All pages' text joined with blank lines. */
   text: string;
+  /** Text of each OCR'd page, in order (one entry for an image). */
+  pageTexts: string[];
   /** Document properties reported by `pdfinfo` (PDFs only). */
   pdfInfo?: PdfInfo;
 }
@@ -130,7 +133,7 @@ export class OcrService {
     try {
       if (kind === "image") {
         const text = await this.ocrImage(buffer);
-        return { kind, pages: 1, totalPages: 1, truncated: false, text };
+        return { kind, pages: 1, totalPages: 1, truncated: false, text, pageTexts: [text] };
       }
       return await this.ocrPdf(buffer);
     } catch (err) {
@@ -171,7 +174,15 @@ export class OcrService {
       const totalPages = Number(/^Pages:\s+(\d+)/m.exec(info)?.[1] ?? 0);
       const pages = Math.min(totalPages, maxPdfPages);
       if (pages === 0) {
-        return { kind: "pdf", pages: 0, totalPages, truncated: false, text: "", pdfInfo };
+        return {
+          kind: "pdf",
+          pages: 0,
+          totalPages,
+          truncated: false,
+          text: "",
+          pageTexts: [],
+          pdfInfo,
+        };
       }
 
       // pdftoppm writes page-01.png, page-02.png, ... (zero-padded, so a name sort is page order).
@@ -205,6 +216,7 @@ export class OcrService {
         totalPages,
         truncated: totalPages > pages,
         text: texts.join("\n\n").trim(),
+        pageTexts: texts,
         pdfInfo,
       };
     } finally {

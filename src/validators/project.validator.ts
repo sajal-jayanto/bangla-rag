@@ -44,14 +44,8 @@ export const updateProjectSchema = z
     path: ["body"],
   });
 
-const idField = (label: string) =>
-  z.string().regex(/^[1-9]\d{0,17}$/, `${label} id must be a positive integer`);
-
-export const projectIdParamsSchema = z.object({ id: idField("Project") });
-
-export const documentParamsSchema = z.object({
-  id: idField("Project"),
-  documentId: idField("Document"),
+export const projectIdParamsSchema = z.object({
+  id: z.string().regex(/^[1-9]\d{0,17}$/, "Project id must be a positive integer"),
 });
 
 export type CreateProjectBody = z.infer<typeof createProjectSchema>;

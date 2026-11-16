@@ -1,0 +1,60 @@
+export interface ChunkOptions {
+  /** Upper bound on a chunk's length in characters. */
+  maxChars: number;
+  /** Characters repeated from the end of one chunk at the start of the next. */
+  overlap: number;
+}
+
+const DEFAULT_OPTIONS: ChunkOptions = { maxChars: 1000, overlap: 150 };
+
+// Break after a paragraph, a line, or a sentence end (Bangla dari "।", "?", "!", ".").
+const SEGMENT_BOUNDARY = /(?<=\n\n|\n|[।?!.])\s+/u;
+
+/** Splits a piece longer than `max` at whitespace where possible, otherwise mid-word. */
+const hardSplit = (piece: string, max: number): string[] => {
+  const parts: string[] = [];
+  let rest = piece;
+  while (rest.length > max) {
+    const space = rest.lastIndexOf(" ", max);
+    const cut = space > max / 2 ? space : max;
+    parts.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) parts.push(rest);
+  return parts;
+};
+
+/** The last `overlap` characters of `chunk`, starting at a word boundary. */
+const tail = (chunk: string, overlap: number): string => {
+  if (overlap <= 0 || chunk.length <= overlap) return "";
+  const start = chunk.indexOf(" ", chunk.length - overlap);
+  return start === -1 ? "" : chunk.slice(start + 1);
+};
+
+/**
+ * Splits text into chunks of at most `maxChars`, breaking at paragraph and sentence ends where
+ * possible, with `overlap` characters of context carried into the next chunk.
+ */
+export const chunkText = (text: string, options: Partial<ChunkOptions> = {}): string[] => {
+  const { maxChars, overlap } = { ...DEFAULT_OPTIONS, ...options };
+  const segments = text
+    .split(SEGMENT_BOUNDARY)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .flatMap((s) => hardSplit(s, maxChars - overlap));
+
+  const chunks: string[] = [];
+  let current = "";
+  for (const segment of segments) {
+    const candidate = current ? `${current} ${segment}` : segment;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+      continue;
+    }
+    chunks.push(current);
+    const carried = tail(current, overlap);
+    current = carried ? `${carried} ${segment}` : segment;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+};
