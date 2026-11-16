@@ -26,10 +26,8 @@ const UPDATABLE_COLUMNS = ["name", "description", "status", "priority"] as const
 const isPgError = (err: unknown): err is { code: string } =>
   typeof err === "object" && err !== null && "code" in err;
 
-/** Thrown by `create` when the slug is already used by another live project of the owner. */
 export class SlugTakenError extends Error {}
 
-// Every query is scoped to the owner and skips soft-deleted rows.
 export class ProjectRepository {
   constructor(private readonly db: pg.Pool) {}
 
@@ -59,10 +57,8 @@ export class ProjectRepository {
     }
   }
 
-  /** Slugs of the owner's live projects that equal `base` or start with `base-`. */
   async findSlugsLike(ownerId: string, base: string): Promise<string[]> {
     try {
-      // Slugs never contain `%` or `_`, so `base` is safe inside the LIKE pattern.
       const { rows } = await this.db.query<{ slug: string }>(
         `SELECT slug FROM projects
          WHERE owner_id = $1 AND NOT is_deleted AND (slug = $2 OR slug LIKE $2 || '-%')`,
@@ -106,7 +102,6 @@ export class ProjectRepository {
     }
   }
 
-  /** Updates only the fields given; returns null if no live project of the owner has this id. */
   async update(ownerId: string, id: string, data: UpdateProjectData): Promise<ProjectRow | null> {
     const values: unknown[] = [id, ownerId];
     const sets = ["updated_at = now()"];
@@ -132,7 +127,6 @@ export class ProjectRepository {
     }
   }
 
-  /** Sets `is_deleted = true`; returns false if no live project of the owner has this id. */
   async softDelete(ownerId: string, id: string): Promise<boolean> {
     try {
       const { rowCount } = await this.db.query(

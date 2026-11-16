@@ -6,12 +6,10 @@ import { SlugTakenError, type ProjectRepository } from "../repositories/project.
 import { slugify } from "../utils/slugify.js";
 import type { CreateProjectBody, UpdateProjectBody } from "../validators/project.validator.js";
 
-// Retries cover the race where two requests pick the same free slug at the same time.
 const SLUG_ATTEMPTS = 3;
 
 const notFound = () => new HttpError("Project not found", StatusCodes.NOT_FOUND);
 
-/** `base` if it is free, otherwise `base-N` with the smallest free N ≥ 2. */
 export const nextFreeSlug = (base: string, taken: readonly string[]): string => {
   const used = new Set(taken);
   if (!used.has(base)) return base;
@@ -23,7 +21,6 @@ export const nextFreeSlug = (base: string, taken: readonly string[]): string => 
 export class ProjectService {
   constructor(private readonly projectRepository: ProjectRepository) {}
 
-  // The slug is derived from the name on create and stays fixed afterwards.
   async create(ownerId: string, body: CreateProjectBody): Promise<Project> {
     const base = slugify(body.name);
     for (let attempt = 1; ; attempt++) {

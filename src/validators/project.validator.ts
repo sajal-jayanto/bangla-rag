@@ -8,7 +8,6 @@ const nameField = z
   .min(1, "Name is required")
   .max(150, "Name cannot exceed 150 characters");
 
-// An empty or null description is stored as NULL.
 const descriptionField = z
   .string({ error: "Description must be a string or null" })
   .trim()
@@ -24,7 +23,6 @@ const priorityField = z.enum(PROJECT_PRIORITIES, {
   error: `Priority must be one of: ${PROJECT_PRIORITIES.join(", ")}`,
 });
 
-// Strict objects reject fields the user may not set (slug, ownerId, timestamps, ...).
 export const createProjectSchema = z.strictObject({
   name: nameField,
   description: descriptionField.optional(),

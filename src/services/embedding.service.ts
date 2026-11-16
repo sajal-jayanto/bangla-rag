@@ -3,14 +3,11 @@ import { StatusCodes } from "http-status-codes";
 
 import { HttpError } from "../middlewares/error.middleware.js";
 
-/** Must match `vector(768)` on `chunks.embedding` (migrations/005_create_chunks.sql). */
 export const EMBEDDING_DIMENSIONS = 768;
 
-// The Gemini API accepts at most 100 texts per embedContent request.
 const BATCH_SIZE = 100;
 const EMBED_TIMEOUT_MS = 30_000;
 
-// Stored chunks and search questions use matching task types so their vectors compare well.
 type EmbeddingTask = "RETRIEVAL_DOCUMENT" | "QUESTION_ANSWERING";
 
 export interface EmbeddingOptions {
@@ -18,7 +15,6 @@ export interface EmbeddingOptions {
   model: string;
 }
 
-/** Scales to unit length; Gemini only normalises the full 3072-dimension output itself. */
 const normalize = (values: number[]): number[] => {
   const norm = Math.hypot(...values);
   return norm === 0 ? values : values.map((v) => v / norm);
@@ -35,12 +31,10 @@ export class EmbeddingService {
     return this.options.model;
   }
 
-  /** Embeds texts for storage and later retrieval; returns one vector per text, in order. */
   embedDocuments(texts: string[]): Promise<number[][]> {
     return this.embed(texts, "RETRIEVAL_DOCUMENT");
   }
 
-  /** Embeds a search question, to compare against stored chunk embeddings. */
   async embedQuery(question: string): Promise<number[]> {
     const [vector] = await this.embed([question], "QUESTION_ANSWERING");
     return vector;

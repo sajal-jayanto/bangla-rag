@@ -3,7 +3,6 @@ import path from "node:path";
 import type pg from "pg";
 import { logger } from "../config/logger.js";
 
-// `migrations/` sits at the project root, next to both `src/` (dev) and `dist/` (build).
 const migrationsDir = path.resolve(import.meta.dirname, "..", "..", "migrations");
 
 interface Migration {
@@ -11,8 +10,6 @@ interface Migration {
   sql: string;
 }
 
-// Files are applied in filename order (e.g. 001_init.sql, 002_add_x.sql); the id is the
-// filename without `.sql`. Add a new file for each change; never edit one that has already run.
 const loadMigrations = async (): Promise<Migration[]> => {
   const files = (await readdir(migrationsDir)).filter((f) => f.endsWith(".sql")).sort();
   return Promise.all(
@@ -27,7 +24,6 @@ export const runMigrations = async (pool: pg.Pool): Promise<void> => {
   const migrations = await loadMigrations();
   const client = await pool.connect();
   try {
-    // Serialize concurrent starts (e.g. several API replicas) on a fixed advisory lock.
     await client.query("SELECT pg_advisory_lock(727274)");
     await client.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (

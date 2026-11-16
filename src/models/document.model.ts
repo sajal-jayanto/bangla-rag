@@ -3,7 +3,6 @@ import type { OcrFileKind, PdfInfo } from "../services/ocr.service.js";
 export const OCR_STATUSES = ["completed", "failed"] as const;
 export type OcrStatus = (typeof OCR_STATUSES)[number];
 
-/** Metadata of an uploaded file. The file itself is never stored; its text lives in `chunks`. */
 export interface DocumentRow {
   id: string;
   project_id: string;

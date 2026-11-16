@@ -1,109 +1,193 @@
 # Bangla RAG
 
-A starter for a Bangla retrieval-augmented generation service, built with **Express 5**, **TypeScript**, **PostgreSQL + pgvector** and **JWT** authentication. It ships with registration, login and a dashboard endpoint, with the `vector` extension enabled for the RAG schema to come.
+A retrieval-augmented generation (RAG) API for Bangla documents. Upload a scanned PDF or an image to a project, and the service reads it with OCR, splits the text into chunks, embeds them with Gemini and stores them in PostgreSQL + pgvector. You can then ask questions in Bangla and get answers drawn **only** from your own documents — or **`জানা নেই`** ("not known") when they don't contain the answer.
+
+Built with **Express 5**, **TypeScript**, **PostgreSQL 17 + pgvector**, **Tesseract OCR** and the **Google Gen AI SDK** (Gemini).
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [Walkthrough](#walkthrough)
+- [API reference](#api-reference)
+- [Database](#database)
+- [Project structure](#project-structure)
+- [Scripts](#scripts)
+- [Testing and CI](#testing-and-ci)
+- [License](#license)
+
+## How it works
+
+```
+ Upload (PDF / PNG / JPG, ≤ 5 MB)                      Question ("পদ্মা সেতুর দৈর্ঘ্য কত?")
+          │                                                        │
+          ▼                                                        ▼
+ Tesseract OCR (Bangla + English)                       Gemini embedding of the question
+  PDFs: up to 20 pages at 300 DPI                                  │
+          │                                                        ▼
+          ▼                                             pgvector: nearest chunks in the project
+ Split into ~1000-char chunks per page                   (cosine similarity ≥ 0.6)
+          │                                                        │
+          ▼                                              none ─────┴───── some
+ Gemini embeddings (768 dims)                             │                 │
+          │                                               ▼                 ▼
+          ▼                                          "জানা নেই"     Gemini answers from those
+ PostgreSQL: document metadata + chunks                             chunks only (or "জানা নেই")
+ (the uploaded file itself is never stored)
+```
 
 ## Features
 
-- Register / login with bcrypt-hashed passwords and HS256 JWTs
-- Dashboard API: current user plus Postgres / pgvector versions
-- PostgreSQL 17 with the `vector` extension enabled
-- Schema migrations run automatically on startup (or with `npm run migrate`)
-- Request validation with Zod, security headers (Helmet), CORS, structured logging (Pino)
-- Graceful shutdown on `SIGINT` / `SIGTERM`
+- **Accounts** — register and log in with bcrypt-hashed passwords and HS256 JWTs.
+- **Projects** — create, list, update and soft-delete projects; each user only sees their own. Slugs are generated from the name and keep Bangla text (`আমার প্রকল্প` → `আমার-প্রকল্প`).
+- **OCR upload** — PDF, PNG and JPG up to 5 MB, read with Tesseract in Bangla and English. The file type is checked from its content, not its name. The file is held in memory only and never saved.
+- **Chunking and embeddings** — text is split page by page at sentence ends (including `।`) with overlap, embedded with `gemini-embedding-001` and stored with a vector index.
+- **Document metadata** — name, type, size, SHA-256, page counts, PDF properties (title, author, …), OCR status and timing, chunk count. Failed uploads are recorded too.
+- **Question answering** — semantic search over a project's chunks, answered by Gemini using only the retrieved text, with the sources returned alongside. Replies `জানা নেই` when nothing relevant is found.
+- **Operations** — SQL migrations applied on startup, Zod request validation, Helmet, CORS, structured logging with Pino, graceful shutdown, Docker image with OCR tools included.
 
 ## Tech stack
 
-| Area       | Tools                                 |
-| ---------- | ------------------------------------- |
-| Runtime    | Node.js, Express 5, TypeScript (ESM)  |
-| Database   | PostgreSQL 17, pgvector, `pg`         |
-| Auth       | jsonwebtoken, bcryptjs                |
-| Validation | Zod                                   |
-| Tooling    | tsx, ESLint, Prettier, Docker Compose |
+| Area       | Tools                                                        |
+| ---------- | ------------------------------------------------------------ |
+| Runtime    | Node.js 24, Express 5, TypeScript (ESM)                      |
+| Database   | PostgreSQL 17, pgvector (HNSW cosine index), `pg`            |
+| OCR        | Tesseract 5 (`ben` + `eng`), Poppler (`pdfinfo`, `pdftoppm`) |
+| AI         | `@google/genai` — `gemini-embedding-001`, `gemini-3.5-flash` |
+| Auth       | jsonwebtoken, bcryptjs                                       |
+| Uploads    | multer (in-memory)                                           |
+| Validation | Zod                                                          |
+| Tooling    | tsx, ESLint, Prettier, node:test, Docker Compose             |
 
 ## Getting started
 
-### 1. Install dependencies
+### Requirements
 
-```bash
-npm install
-```
+- **Docker** with Docker Compose — enough to run everything.
+- To run the API outside Docker: **Node.js 24+**, plus Tesseract and Poppler:
 
-To run the API outside Docker you also need Tesseract (with Bangla and English) and Poppler for OCR. The Docker image already includes them.
+  ```bash
+  sudo apt install tesseract-ocr tesseract-ocr-ben tesseract-ocr-eng poppler-utils   # Debian / Ubuntu
+  tesseract --list-langs   # should list ben and eng
+  ```
 
-```bash
-sudo apt install tesseract-ocr tesseract-ocr-ben tesseract-ocr-eng poppler-utils   # Debian / Ubuntu
-tesseract --list-langs   # should list ben and eng
-```
+- A **Gemini API key** from [Google AI Studio](https://aistudio.google.com/apikey) for uploads and search.
 
-### 2. Configure the environment
+### 1. Configure
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable                 | Required    | Default                | Description                                                               |
-| ------------------------ | ----------- | ---------------------- | ------------------------------------------------------------------------- |
-| `PORT`                   | no          | `3000`                 | Port the API listens on                                                   |
-| `NODE_ENV`               | no          | `development`          | `development` includes stack traces in errors                             |
-| `DATABASE_URL`           | **yes**     | —                      | Postgres connection string (used by `npm run dev`)                        |
-| `POSTGRES_USER`          | Docker      | `bangla_rag`           | User for the Docker Postgres container                                    |
-| `POSTGRES_PASSWORD`      | Docker      | —                      | Password for the Docker Postgres container                                |
-| `POSTGRES_DB`            | Docker      | `bangla_rag`           | Database name                                                             |
-| `POSTGRES_PORT`          | no          | `5432`                 | Host port for the Docker Postgres container                               |
-| `GEMINI_API_KEY`         | for uploads | —                      | Gemini API key used to embed OCR text (uploads return `503` without it)   |
-| `GEMINI_EMBEDDING_MODEL` | no          | `gemini-embedding-001` | Gemini embedding model                                                    |
-| `GEMINI_CHAT_MODEL`      | no          | `gemini-3.5-flash`     | Gemini model that writes search answers                                   |
-| `SEARCH_MIN_SIMILARITY`  | no          | `0.6`                  | Cosine similarity (0–1) a chunk needs to count as related to the question |
-| `JWT_SECRET`             | **yes**     | —                      | Signing secret, **at least 32 characters**                                |
-| `JWT_EXPIRES_IN`         | no          | `1h`                   | Token lifetime (e.g. `15m`, `1h`, `7d`)                                   |
-
-Generate a strong secret with:
+Set at least `POSTGRES_PASSWORD` (and the same password in `DATABASE_URL`), `JWT_SECRET` and `GEMINI_API_KEY`. Generate a JWT secret with:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
-### 3a. Run everything in Docker
+`.env` is git-ignored; never commit real keys.
+
+### 2a. Run everything in Docker
 
 ```bash
 docker compose up -d --build
 ```
 
-The API is available at <http://localhost:3000> (try `GET /health`).
+The API is at <http://localhost:3000> — check it with `curl localhost:3000/health`. The image includes Tesseract (Bangla + English) and Poppler.
 
-### 3b. Or run only the database in Docker and the API locally
+### 2b. Or run the database in Docker and the API locally
 
 ```bash
+npm install
 docker compose up -d db
 npm run dev
 ```
 
-Postgres is bound to `127.0.0.1` only and its data lives in the `pg-data` volume.
+Postgres is bound to `127.0.0.1` only, and its data lives in the `pg-data` volume. Migrations run automatically when the API starts.
 
-## API
+### 3. Optional: sample data
 
-| Method | Path                          | Auth | Description                                                        |
-| ------ | ----------------------------- | ---- | ------------------------------------------------------------------ |
-| GET    | `/health`                     | —    | Liveness check                                                     |
-| POST   | `/api/auth/register`          | —    | `{ name, email, password }` → user + token                         |
-| POST   | `/api/auth/login`             | —    | `{ email, password }` → user + token                               |
-| GET    | `/api/users/me`               | JWT  | Current user                                                       |
-| GET    | `/api/dashboard`              | JWT  | User and DB info                                                   |
-| GET    | `/api/projects`               | JWT  | Your projects, newest first                                        |
-| POST   | `/api/projects`               | JWT  | Create a project                                                   |
-| GET    | `/api/projects/:id`           | JWT  | One of your projects                                               |
-| PATCH  | `/api/projects/:id`           | JWT  | Update a project                                                   |
-| DELETE | `/api/projects/:id`           | JWT  | Soft-delete a project (`204`)                                      |
-| POST   | `/api/projects/:id/ocr`       | JWT  | OCR + embed a PDF or image, returns metadata                       |
-| GET    | `/api/projects/:id/documents` | JWT  | Metadata of files uploaded to the project                          |
-| POST   | `/api/projects/:id/search`    | JWT  | Ask a question; answers from the project's documents or `জানা নেই` |
+```bash
+npm run seed
+```
 
-Authenticated routes expect an `Authorization: Bearer <token>` header.
+Creates a demo user **`demo@example.com` / `password123`** with sample projects. Safe to run more than once; refuses to run when `NODE_ENV=production`.
+
+## Configuration
+
+| Variable                 | Required         | Default                | Description                                                                          |
+| ------------------------ | ---------------- | ---------------------- | ------------------------------------------------------------------------------------ |
+| `PORT`                   | no               | `3000`                 | Port the API listens on                                                              |
+| `NODE_ENV`               | no               | `development`          | `development` adds stack traces to error responses and logs OCR at debug level       |
+| `DATABASE_URL`           | **yes**          | —                      | Postgres connection string (Docker Compose builds its own for the `api` service)     |
+| `POSTGRES_USER`          | Docker           | `bangla_rag`           | User for the Postgres container                                                      |
+| `POSTGRES_PASSWORD`      | Docker           | —                      | Password for the Postgres container                                                  |
+| `POSTGRES_DB`            | Docker           | `bangla_rag`           | Database name                                                                        |
+| `POSTGRES_PORT`          | no               | `5432`                 | Host port for the Postgres container                                                 |
+| `GEMINI_API_KEY`         | uploads & search | —                      | Gemini API key. Without it the API still starts, but uploads and search return `503` |
+| `GEMINI_EMBEDDING_MODEL` | no               | `gemini-embedding-001` | Embedding model (must produce 768-dimension vectors)                                 |
+| `GEMINI_CHAT_MODEL`      | no               | `gemini-3.5-flash`     | Model that writes search answers                                                     |
+| `SEARCH_MIN_SIMILARITY`  | no               | `0.6`                  | Cosine similarity (0–1) a chunk needs to count as related to a question              |
+| `JWT_SECRET`             | **yes**          | —                      | Token signing secret, **at least 32 characters**                                     |
+| `JWT_EXPIRES_IN`         | no               | `1h`                   | Token lifetime, e.g. `15m`, `1h`, `7d`                                               |
+
+## Walkthrough
+
+```bash
+API=http://localhost:3000/api
+
+# 1. Register (or log in) and keep the token
+TOKEN=$(curl -s -X POST $API/auth/register -H "Content-Type: application/json" \
+  -d '{"name":"Rahim","email":"rahim@example.com","password":"a-strong-password"}' | jq -r .token)
+
+# 2. Create a project
+curl -s -X POST $API/projects -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"বাংলা নথি","priority":"high"}'
+# → { "project": { "id": "1", "slug": "বাংলা-নথি", ... } }
+
+# 3. Upload a scanned PDF or image to it
+curl -s -X POST $API/projects/1/ocr -H "Authorization: Bearer $TOKEN" -F "file=@scan.pdf"
+
+# 4. Ask a question
+curl -s -X POST $API/projects/1/search -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"query":"পদ্মা সেতুর দৈর্ঘ্য কত?"}'
+```
+
+## API reference
+
+All `/api` routes except `/api/auth/*` need an `Authorization: Bearer <token>` header. Request and response bodies are JSON unless noted.
+
+| Method | Path                          | Description                                           |
+| ------ | ----------------------------- | ----------------------------------------------------- |
+| GET    | `/health`                     | Liveness check                                        |
+| POST   | `/api/auth/register`          | Create an account → user + token                      |
+| POST   | `/api/auth/login`             | Log in → user + token                                 |
+| GET    | `/api/users/me`               | The current user                                      |
+| GET    | `/api/dashboard`              | The current user plus Postgres and pgvector versions  |
+| GET    | `/api/projects`               | Your projects, newest first                           |
+| POST   | `/api/projects`               | Create a project                                      |
+| GET    | `/api/projects/:id`           | One of your projects                                  |
+| PATCH  | `/api/projects/:id`           | Update a project                                      |
+| DELETE | `/api/projects/:id`           | Soft-delete a project                                 |
+| POST   | `/api/projects/:id/ocr`       | Upload a PDF or image: OCR, chunk, embed and save     |
+| GET    | `/api/projects/:id/documents` | Metadata of the files uploaded to a project           |
+| POST   | `/api/projects/:id/search`    | Ask a question; answered from the project's documents |
+
+### Auth
+
+`POST /api/auth/register` — `{ "name", "email", "password" }`
+
+- `name` 1–100 characters; `email` valid, stored lower-case; `password` 8+ characters and at most 72 bytes.
+- `201` → `{ "user": { "id", "name", "email", "role" }, "token" }`. `409` if the email is already registered.
+
+`POST /api/auth/login` — `{ "email", "password" }`
+
+- `200` → same shape as register. `404` if no account has that email, `401` if the password is wrong.
 
 ### Projects
-
-Create and update accept only `name`, `description`, `status` and `priority`; any other field is rejected with `400`. On update, send just the fields to change.
 
 | Field         | Values                                        | Default    |
 | ------------- | --------------------------------------------- | ---------- |
@@ -112,35 +196,47 @@ Create and update accept only `name`, `description`, `status` and `priority`; an
 | `status`      | `planning`, `active`, `completed`, `archived` | `planning` |
 | `priority`    | `low`, `mid`, `high`                          | `mid`      |
 
-The `slug` is generated from the name on create (Bangla text is kept, e.g. `আমার-প্রকল্প`), gets a `-2`, `-3`, … suffix if you already have that slug, and does not change when the project is renamed. `ownerId` is the signed-in user. Deleting sets `is_deleted = true`; deleted projects no longer appear in any endpoint and their slug can be reused. Other users' projects return `404`.
+```json
+{
+  "project": {
+    "id": "5",
+    "ownerId": "5",
+    "name": "Bangla News Search",
+    "slug": "bangla-news-search",
+    "description": "Semantic search over Bangla news articles.",
+    "status": "active",
+    "priority": "high",
+    "createdAt": "2026-11-16T07:47:18.120Z"
+  }
+}
+```
 
-### OCR
+- **Create** (`201`) and **update** (`200`) accept only `name`, `description`, `status` and `priority`; any other field (such as `slug` or `ownerId`) is rejected with `400`. On update, send just the fields to change.
+- **Slug** — generated from the name on create, gets a `-2`, `-3`, … suffix if you already use it, and stays the same when the project is renamed.
+- **Delete** (`204`) is a soft delete: the project disappears from every endpoint, its slug can be reused, and the data stays in the database.
+- Another user's project, or a deleted one, returns `404`.
 
-`POST /api/projects/:id/ocr` takes `multipart/form-data` with one file in the field `file`. The server:
+### Upload a document — `POST /api/projects/:id/ocr`
 
-1. OCRs it with Tesseract (Bangla + English);
-2. splits the text into chunks of up to ~1000 characters (150 overlap), page by page, breaking at sentence ends (`।`, `.`, `?`, `!`) where possible;
-3. embeds each chunk with Gemini (`gemini-embedding-001`, 768 dimensions, `RETRIEVAL_DOCUMENT`);
-4. saves the document metadata and the chunks (text, page number, embedding) in one transaction.
-
-It answers `201` with the processing result (the document metadata), **not** the text. The uploaded file itself is held in memory only and never stored.
+`multipart/form-data` with one file in the field **`file`**.
 
 ```bash
 curl -X POST http://localhost:3000/api/projects/5/ocr \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "file=@scan.pdf"
+  -H "Authorization: Bearer $TOKEN" -F "file=@scan.pdf"
 ```
+
+`201` with the processing result — the document's metadata, **not** its text:
 
 ```json
 {
   "document": {
-    "id": "2",
+    "id": "10",
     "projectId": "5",
     "uploadedBy": "5",
     "fileName": "scan.pdf",
     "mimeType": "application/pdf",
     "sizeBytes": 27261,
-    "sha256": "85bd5dee…",
+    "sha256": "85bd5dee25e993ac9a9e1a20868d3a7dbbdde4324f6536e98ec7efaf73f4a073",
     "kind": "pdf",
     "pageCount": 2,
     "pagesProcessed": 2,
@@ -148,29 +244,44 @@ curl -X POST http://localhost:3000/api/projects/5/ocr \
     "pdfInfo": {
       "producer": "GPL Ghostscript 10.06.0",
       "pdfVersion": "1.7",
-      "pageSize": "595 x 842 pts (A4)"
+      "pageSize": "595 x 842 pts (A4)",
+      "encrypted": "no"
     },
     "ocrStatus": "completed",
     "ocrError": null,
     "ocrDurationMs": 1291,
     "chunkCount": 2,
-    "embeddingModel": "gemini-embedding-001",
-    "createdAt": "2026-11-16T08:43:03.583Z"
+    "embeddingModel": "gemini-embedding-001"
   },
   "truncated": false
 }
 ```
 
-- Accepted: **PDF, PNG and JPG/JPEG** only; the file content is checked, not just the extension or type (`415` otherwise).
-- Max **5 MB** (`413` if larger). PDFs are OCR'd up to the first 20 pages at 300 DPI; `truncated` is `true` when there were more.
-- The project must be one of yours and not deleted (`404` otherwise).
-- `503` if `tesseract` or Poppler is not installed, or `GEMINI_API_KEY` is not set; `502` if the Gemini API call fails; `422` if the file can't be read (corrupt or encrypted PDF). A failed OCR or embedding is still recorded (with no chunks), with `ocrStatus: "failed"` and the reason in `ocrError`; rejected uploads (`413`, `415`, `404`) are not.
-- `pdfInfo` holds the PDF's own properties when set (title, subject, author, creator, producer, creation/modification date, page size, PDF version, encrypted). It is `null` for images.
-- Bangla file names are kept as-is.
+- **Accepted:** PDF, PNG and JPG/JPEG only, up to **5 MB**. The content is checked, so a renamed file is rejected.
+- **PDFs** are OCR'd up to the first **20 pages** at 300 DPI; `truncated` is `true` when the PDF had more.
+- **Chunks** are up to ~1000 characters with 150 characters of overlap, split page by page at paragraph and sentence ends (`।`, `.`, `?`, `!`). Each chunk keeps its page number.
+- **`pdfInfo`** holds the PDF's own properties when set (title, subject, author, creator, producer, creation and modification dates, page size, PDF version, encrypted); `null` for images.
+- **Storage:** the file is never written anywhere. The metadata and the chunks (text + embedding) are saved in one transaction.
+- **Failures:** if OCR or embedding fails, the document is still recorded with `ocrStatus: "failed"`, the reason in `ocrError` and no chunks. Uploads rejected up front (`404`, `413`, `415`) are not recorded.
 
-### Search
+| Status | When                                                                |
+| ------ | ------------------------------------------------------------------- |
+| `400`  | No file, or not sent in the `file` field                            |
+| `404`  | The project isn't yours or is deleted                               |
+| `413`  | The file is larger than 5 MB                                        |
+| `415`  | Not a PDF, PNG or JPG                                               |
+| `422`  | The file can't be read (corrupt or encrypted PDF)                   |
+| `502`  | The Gemini embedding request failed                                 |
+| `503`  | Tesseract or Poppler isn't installed, or `GEMINI_API_KEY` isn't set |
 
-`POST /api/projects/:id/search` answers a question (Bangla or English) from the documents uploaded to that project.
+`GET /api/projects/:id/documents` → `{ "documents": [ ... ] }`, newest first, each in the shape above.
+
+### Search — `POST /api/projects/:id/search`
+
+| Field   | Values                          | Default  |
+| ------- | ------------------------------- | -------- |
+| `query` | the question, 1–1000 characters | required |
+| `limit` | 1–20                            | `5`      |
 
 ```bash
 curl -X POST http://localhost:3000/api/projects/5/search \
@@ -190,42 +301,106 @@ curl -X POST http://localhost:3000/api/projects/5/search \
       "pageNumber": null,
       "chunkIndex": 0,
       "similarity": 0.6589,
-      "content": "..."
+      "content": "ঢাকা বাংলাদেশের রাজধানী এবং সবচেয়ে বড় শহর। ..."
     }
   ]
 }
 ```
 
-1. The question is embedded with Gemini (`QUESTION_ANSWERING`, 768 dimensions).
-2. The project's `limit` (default 5, max 20) nearest chunks are found by cosine similarity; those below `SEARCH_MIN_SIMILARITY` (0.6) are dropped.
-3. If none are left, the answer is **`জানা নেই`** ("not known") and Gemini is not called.
-4. Otherwise Gemini answers using **only** those chunks, in Bangla, and replies `জানা নেই` if they don't contain the answer.
+1. The question is embedded with Gemini.
+2. The `limit` nearest chunks in the project are fetched by cosine similarity, and those below `SEARCH_MIN_SIMILARITY` (0.6) are dropped. `limit` is an upper bound: you may get fewer sources.
+3. If no chunk is left, the answer is **`জানা নেই`** and Gemini is not called.
+4. Otherwise Gemini answers in Bangla using **only** those chunks, and replies `জানা নেই` if they don't contain the answer.
 
-When the answer is `জানা নেই`, `found` is `false` and `sources` is empty. `404` for a project that isn't yours; `502` / `504` if Gemini fails or takes over 30 s.
+When the answer is `জানা নেই`, `found` is `false` and `sources` is empty:
 
-## Database schema
+```json
+{ "query": "ঢাকার জনসংখ্যা কত?", "found": false, "answer": "জানা নেই", "sources": [] }
+```
 
-- `users` — accounts, unique case-insensitive email, `user` / `admin` role
-- `projects` — owned by a user; `slug` unique per owner among non-deleted projects; soft-deleted via the `is_deleted` boolean
-- `documents` — metadata of each file uploaded to a project (name, type, size, SHA-256, pages, text length, PDF properties, OCR status and duration, chunk count, embedding model); the file itself is not stored
-- `chunks` — OCR text chunks of a document with page number and a `vector(768)` Gemini embedding, HNSW cosine index
-- `schema_migrations` — applied migration ids
+`404` for a project that isn't yours; `502` if a Gemini request fails; `504` if Gemini takes longer than 30 seconds.
 
-Migrations are plain SQL files in [migrations/](migrations/), applied in filename order by [src/db/migrate.ts](src/db/migrate.ts). Each file runs in its own transaction and its name (without `.sql`) is recorded in `schema_migrations`. To change the schema, run `npm run migrate:create -- add_tags` (creates e.g. `002_add_tags.sql`), write the SQL, then `npm run migrate`; never edit one that has already run.
+### Errors
+
+Errors share one shape; `details` appears on validation errors, and `stack` only when `NODE_ENV=development`.
+
+```json
+{
+  "statusCode": 400,
+  "message": "Validation failed",
+  "details": { "query": ["Query is required"] }
+}
+```
+
+## Database
+
+| Table               | Contents                                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `users`             | Accounts; unique case-insensitive email; `user` / `admin` role                                                                     |
+| `projects`          | Owned by a user; `slug` unique per owner among non-deleted projects; soft-deleted with `is_deleted`                                |
+| `documents`         | Metadata of each uploaded file (see [Upload a document](#upload-a-document--post-apiprojectsidocr)); the file itself is not stored |
+| `chunks`            | OCR text chunks with page number and a `vector(768)` embedding; HNSW `vector_cosine_ops` index                                     |
+| `schema_migrations` | Ids of applied migrations                                                                                                          |
+
+Deleting a user removes their projects; deleting a project row removes its documents and chunks.
+
+### Migrations
+
+Migrations are plain SQL files in [migrations/](migrations/), applied in filename order. Each runs in its own transaction and its name is recorded in `schema_migrations`, so it runs only once. They run automatically when the API starts, or with `npm run migrate`.
+
+To change the schema:
+
+```bash
+npm run migrate:create -- add_tags   # creates migrations/006_add_tags.sql
+# write the SQL in that file
+npm run migrate
+```
+
+Never edit a migration that has already run — add a new one instead.
+
+## Project structure
+
+```
+migrations/            SQL migrations (001_init.sql, 002_create_projects.sql, ...)
+src/
+  app.ts               Express app: middleware and routes
+  server.ts            Starts the server, runs migrations, handles shutdown
+  config/              Environment variables and logger
+  db/                  Connection pool, migration runner, migrate:create, seed
+  routes/              Route definitions (api.routes.ts, health.routes.ts)
+  middlewares/         Auth, validation, uploads, errors, logging
+  controllers/         HTTP layer: read the request, call a service, send the response
+  services/            Business logic: auth, projects, OCR, embeddings, documents, search, answers
+  repositories/        SQL queries
+  models/              Row and API types, and the mapping between them
+  validators/          Zod request schemas
+  utils/               Slugs, text chunking, router groups
+```
+
+Requests flow **route → middleware → controller → service → repository**. Tests (`*.test.ts`) sit next to the services they cover.
 
 ## Scripts
 
-| Script                             | Description                                                                         |
-| ---------------------------------- | ----------------------------------------------------------------------------------- |
-| `npm run dev`                      | Start with hot reload (tsx watch)                                                   |
-| `npm run build`                    | Compile TypeScript to `dist/`                                                       |
-| `npm start`                        | Run the compiled build                                                              |
-| `npm run migrate`                  | Apply pending migrations and exit                                                   |
-| `npm run migrate:create -- <name>` | Create the next numbered `migrations/NNN_<name>.sql`                                |
-| `npm run seed`                     | Add a demo user (`demo@example.com` / `password123`) and sample projects (dev only) |
-| `npm test`                         | Run unit tests (node:test)                                                          |
-| `npm run lint`                     | ESLint                                                                              |
-| `npm run format:check`             | Prettier check                                                                      |
+| Script                             | Description                                               |
+| ---------------------------------- | --------------------------------------------------------- |
+| `npm run dev`                      | Start with hot reload (tsx watch)                         |
+| `npm run build`                    | Compile TypeScript to `dist/`                             |
+| `npm start`                        | Run the compiled build                                    |
+| `npm run typecheck`                | Type-check without emitting                               |
+| `npm run migrate`                  | Apply pending migrations and exit                         |
+| `npm run migrate:create -- <name>` | Create the next numbered `migrations/NNN_<name>.sql`      |
+| `npm run seed`                     | Add the demo user and sample projects (not in production) |
+| `npm test`                         | Run the unit tests (node:test)                            |
+| `npm run lint` / `lint:fix`        | ESLint                                                    |
+| `npm run format` / `format:check`  | Prettier                                                  |
+
+## Testing and CI
+
+```bash
+npm test
+```
+
+Unit tests use `node:test` with in-memory fakes, so they need no database, Tesseract or Gemini key. GitHub Actions ([.github/workflows](.github/workflows)) runs lint, the Prettier check and the tests on every push and pull request to `master`.
 
 ## License
 

@@ -99,11 +99,9 @@ apiRouter.group("/projects", [authenticate], (router) => {
   );
   router.delete("/:id", validId, asyncHandler(projectController.remove));
 
-  // OCR a PDF or image (multipart field `file`, max 5 MB), embed the text and save it as chunks.
   router.post("/:id/ocr", validId, uploadSingleFile, asyncHandler(documentController.ocr));
   router.get("/:id/documents", validId, asyncHandler(documentController.list));
 
-  // Answer a question from the project's documents, or "জানা নেই" if they don't say.
   router.post(
     "/:id/search",
     validId,

@@ -3,7 +3,6 @@ import { StatusCodes } from "http-status-codes";
 
 import { HttpError } from "../middlewares/error.middleware.js";
 
-/** The reply when the answer is not in the user's documents ("not known"). */
 export const NOT_FOUND_ANSWER = "জানা নেই";
 
 export interface AnswerOptions {
@@ -11,7 +10,6 @@ export interface AnswerOptions {
   model: string;
 }
 
-// A model that stalls must not hold the request open; the client gets a 504 instead.
 const ANSWER_TIMEOUT_MS = 30_000;
 
 export interface ContextPassage {
@@ -35,7 +33,6 @@ const formatPassages = (passages: ContextPassage[]): string =>
     })
     .join("\n\n");
 
-/** True when the model said it doesn't know, possibly with extra punctuation or whitespace. */
 export const isNotFoundAnswer = (answer: string): boolean =>
   answer.replace(/[\s।.!"'“”]/gu, "") === NOT_FOUND_ANSWER.replace(/\s/gu, "") ||
   answer.trim() === "";
@@ -51,7 +48,6 @@ export class AnswerService {
     return this.options.model;
   }
 
-  /** Answers `question` from `passages` only; returns NOT_FOUND_ANSWER when they don't say. */
   async answer(question: string, passages: ContextPassage[]): Promise<string> {
     if (!this.client) {
       throw new HttpError(

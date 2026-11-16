@@ -14,15 +14,12 @@ export interface SearchSource {
 
 export interface SearchResult {
   query: string;
-  /** False when nothing relevant was found; `answer` is then "জানা নেই". */
   found: boolean;
   answer: string;
-  /** The passages the answer was based on (empty when not found). */
   sources: SearchSource[];
 }
 
 export interface SearchOptions {
-  /** Chunks below this cosine similarity are treated as unrelated to the question. */
   minSimilarity: number;
 }
 
@@ -50,17 +47,12 @@ export class SearchService {
     this.options = { ...DEFAULT_OPTIONS, ...options };
   }
 
-  /**
-   * Finds the project's chunks closest to the question and answers from them only. Answers
-   * "জানা নেই" when no chunk is similar enough or the chunks don't contain the answer.
-   */
   async search(
     ownerId: string,
     projectId: string,
     query: string,
     limit: number,
   ): Promise<SearchResult> {
-    // 404 unless the project exists, is not deleted and belongs to the user.
     await this.projectService.get(ownerId, projectId);
     const notFound: SearchResult = { query, found: false, answer: NOT_FOUND_ANSWER, sources: [] };
 

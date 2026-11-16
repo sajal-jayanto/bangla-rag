@@ -18,7 +18,6 @@ import {
 } from "./ocr.service.js";
 import type { ProjectService } from "./project.service.js";
 
-/** The parts of an uploaded file this service needs (a subset of multer's `File`). */
 export interface UploadedFile {
   originalname: string;
   mimetype: string;
@@ -28,7 +27,6 @@ export interface UploadedFile {
 
 export interface OcrUploadResult {
   document: DocumentMetadata;
-  /** True when the PDF had more pages than were OCR'd. */
   truncated: boolean;
 }
 
@@ -36,7 +34,6 @@ const MAX_FILE_NAME_LENGTH = 255;
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Chunks each page separately so every chunk keeps the page it came from. */
 export const buildChunks = (
   ocr: Pick<OcrResult, "kind" | "pageTexts">,
 ): Omit<NewChunk, "embedding">[] =>
@@ -57,18 +54,11 @@ export class DocumentService {
     private readonly embeddingService: EmbeddingService,
   ) {}
 
-  /**
-   * OCRs an uploaded file, splits the text into chunks, embeds them with Gemini and saves the
-   * document metadata and chunks together. The file itself is not stored.
-   * If OCR or embedding fails, the document is still recorded with `ocr_status = 'failed'` (and
-   * no chunks) before the error is returned to the client.
-   */
   async ocrUpload(
     ownerId: string,
     projectId: string,
     file: UploadedFile,
   ): Promise<OcrUploadResult> {
-    // 404 unless the project exists, is not deleted and belongs to the user.
     await this.projectService.get(ownerId, projectId);
 
     const kind = detectFileKind(file.buffer);

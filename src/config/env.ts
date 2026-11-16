@@ -15,13 +15,11 @@ export const env = {
     url: required("DATABASE_URL"),
   },
   gemini: {
-    // Optional at startup so the rest of the API runs without it; uploads answer 503 instead.
     apiKey: process.env.GEMINI_API_KEY ?? "",
     embeddingModel: process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001",
     chatModel: process.env.GEMINI_CHAT_MODEL ?? "gemini-3.5-flash",
   },
   search: {
-    // Cosine similarity a chunk needs to count as related to the question (0–1).
     minSimilarity: Number(process.env.SEARCH_MIN_SIMILARITY ?? 0.6),
   },
   jwt: {

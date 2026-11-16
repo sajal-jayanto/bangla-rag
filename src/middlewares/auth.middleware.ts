@@ -20,7 +20,6 @@ declare module "express-serve-static-core" {
 const isUserRole = (value: unknown): value is UserRole =>
   typeof value === "string" && (USER_ROLES as readonly string[]).includes(value);
 
-/** The authenticated user; throws 401 if `authenticate` did not run before the handler. */
 export const requireUser = (req: Request): AuthUser => {
   if (!req.user) {
     throw new HttpError("Authentication required", StatusCodes.UNAUTHORIZED);

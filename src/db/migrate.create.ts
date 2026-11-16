@@ -1,6 +1,3 @@
-/* eslint-disable no-console -- standalone CLI that prints to the terminal; avoids loading env/logger */
-// Usage: npm run migrate:create -- <name>
-// Creates migrations/<next number>_<name>.sql, e.g. 002_add_tags.sql.
 import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 

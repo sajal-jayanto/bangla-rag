@@ -166,7 +166,6 @@ describe("chunkText", () => {
     assert.ok(chunks.length > 1);
     for (const chunk of chunks) assert.ok(chunk.length <= 300, `chunk too long: ${chunk.length}`);
     assert.ok(chunks.slice(0, -1).every((c) => c.endsWith("।")));
-    // Each later chunk starts with words carried over from the end of the previous one.
     for (let i = 1; i < chunks.length; i++) {
       const firstWords = chunks[i].split(" ").slice(0, 2).join(" ");
       assert.ok(chunks[i - 1].includes(firstWords), `chunk ${i} has no overlap`);

@@ -13,9 +13,9 @@ describe("detectFileKind", () => {
   });
 
   it("rejects image formats other than PNG and JPEG", () => {
-    assert.equal(detectFileKind(Buffer.from("RIFF\0\0\0\0WEBPVP8 ")), null); // WEBP
-    assert.equal(detectFileKind(Buffer.from([0x49, 0x49, 0x2a, 0x00])), null); // TIFF
-    assert.equal(detectFileKind(Buffer.from([0x42, 0x4d, 0x00, 0x00])), null); // BMP
+    assert.equal(detectFileKind(Buffer.from("RIFF\0\0\0\0WEBPVP8 ")), null);
+    assert.equal(detectFileKind(Buffer.from([0x49, 0x49, 0x2a, 0x00])), null);
+    assert.equal(detectFileKind(Buffer.from([0x42, 0x4d, 0x00, 0x00])), null);
     assert.equal(detectFileKind(Buffer.from("GIF89a")), null);
   });
 

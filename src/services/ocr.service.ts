@@ -10,20 +10,14 @@ export type OcrFileKind = "pdf" | "image";
 
 export interface OcrResult {
   kind: OcrFileKind;
-  /** Pages OCR'd (1 for an image). */
   pages: number;
-  /** Pages in the PDF; more than `pages` when the PDF was longer than the page limit. */
   totalPages: number;
   truncated: boolean;
-  /** All pages' text joined with blank lines. */
   text: string;
-  /** Text of each OCR'd page, in order (one entry for an image). */
   pageTexts: string[];
-  /** Document properties reported by `pdfinfo` (PDFs only). */
   pdfInfo?: PdfInfo;
 }
 
-/** Selected `pdfinfo` fields; a field is absent when the PDF does not set it. */
 export type PdfInfo = Partial<
   Record<(typeof PDF_INFO_FIELDS)[keyof typeof PDF_INFO_FIELDS], string>
 >;
@@ -56,11 +50,9 @@ export const parsePdfInfo = (output: string): PdfInfo => {
 };
 
 export interface OcrOptions {
-  /** Tesseract language codes joined with `+`. */
   languages: string;
   maxPdfPages: number;
   pdfDpi: number;
-  /** Per external command. */
   timeoutMs: number;
 }
 
@@ -73,11 +65,10 @@ const DEFAULT_OPTIONS: OcrOptions = {
 
 export const UNSUPPORTED_FILE_MESSAGE = "Unsupported file: only PDF, PNG and JPG are accepted";
 
-// File signatures, so a renamed file can't pass as a PDF or image. Only PDF, PNG and JPEG.
 const SIGNATURES: { kind: OcrFileKind; bytes: number[] }[] = [
-  { kind: "pdf", bytes: [0x25, 0x50, 0x44, 0x46, 0x2d] }, // %PDF-
-  { kind: "image", bytes: [0x89, 0x50, 0x4e, 0x47] }, // PNG
-  { kind: "image", bytes: [0xff, 0xd8, 0xff] }, // JPEG
+  { kind: "pdf", bytes: [0x25, 0x50, 0x44, 0x46, 0x2d] },
+  { kind: "image", bytes: [0x89, 0x50, 0x4e, 0x47] },
+  { kind: "image", bytes: [0xff, 0xd8, 0xff] },
 ];
 
 export const detectFileKind = (buffer: Buffer): OcrFileKind | null => {
@@ -87,7 +78,6 @@ export const detectFileKind = (buffer: Buffer): OcrFileKind | null => {
 
 class CommandMissingError extends Error {}
 
-/** Runs a command and resolves with its stdout; rejects on a non-zero exit or timeout. */
 const run = (
   command: string,
   args: string[],
@@ -96,7 +86,6 @@ const run = (
   new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       timeout: timeoutMs,
-      // One thread per process; several requests at once would otherwise oversubscribe the CPU.
       env: { ...process.env, OMP_THREAD_LIMIT: "1" },
     });
     const stdout: Buffer[] = [];
@@ -112,7 +101,7 @@ const run = (
       const details = Buffer.concat(stderr).toString("utf8").trim();
       reject(new Error(`${command} failed (${reason}): ${details}`));
     });
-    child.stdin.on("error", () => undefined); // the close/error handlers report the failure
+    child.stdin.on("error", () => undefined);
     child.stdin.end(input);
   });
 
@@ -123,7 +112,6 @@ export class OcrService {
     this.options = { ...DEFAULT_OPTIONS, ...options };
   }
 
-  /** OCRs a PDF or image held in memory. Nothing is kept after the call returns. */
   async extractText(buffer: Buffer): Promise<OcrResult> {
     const kind = detectFileKind(buffer);
     if (!kind) {
@@ -185,7 +173,6 @@ export class OcrService {
         };
       }
 
-      // pdftoppm writes page-01.png, page-02.png, ... (zero-padded, so a name sort is page order).
       await run(
         "pdftoppm",
         [

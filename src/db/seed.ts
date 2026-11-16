@@ -1,6 +1,3 @@
-// Usage: npm run seed
-// Adds a demo user and sample projects for local development. Safe to run again: the user is
-// reused and only projects whose slug the demo user doesn't have yet are inserted.
 import bcrypt from "bcryptjs";
 
 import { env } from "../config/env.js";
@@ -87,7 +84,6 @@ const upsertDemoUser = async (): Promise<string> => {
 const seedProjects = async (ownerId: string): Promise<number> => {
   let inserted = 0;
   for (const project of PROJECTS) {
-    // Checks deleted rows too, so the soft-deleted sample is not re-added on every run.
     const { rowCount } = await pool.query(
       `INSERT INTO projects (owner_id, name, slug, description, status, priority, is_deleted)
        SELECT $1::bigint, $2::varchar, $3::varchar, $4::text, $5::text, $6::text,

@@ -31,6 +31,10 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
   },
   {
+    files: ["src/db/migrate.create.ts"],
+    rules: { "no-console": "off" },
+  },
+  {
     // node:test's describe/it return promises the runner tracks itself.
     files: ["**/*.test.ts"],
     rules: { "@typescript-eslint/no-floating-promises": "off" },

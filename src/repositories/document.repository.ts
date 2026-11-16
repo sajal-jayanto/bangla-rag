@@ -42,11 +42,9 @@ const documentValues = (data: CreateDocumentData): unknown[] => [
   data.embedding_model,
 ];
 
-// Ownership is checked by the caller through the project (see DocumentService).
 export class DocumentRepository {
   constructor(private readonly db: pg.Pool) {}
 
-  /** Saves document metadata only (used when processing failed, so there are no chunks). */
   async create(data: CreateDocumentData): Promise<DocumentRow> {
     try {
       const { rows } = await this.db.query<DocumentRow>(INSERT_DOCUMENT, documentValues(data));
@@ -58,7 +56,6 @@ export class DocumentRepository {
     }
   }
 
-  /** Saves the document and all of its chunks in one transaction: either all are stored or none. */
   async createWithChunks(data: CreateDocumentData, chunks: NewChunk[]): Promise<DocumentRow> {
     const client = await this.db.connect();
     try {

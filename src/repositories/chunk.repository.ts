@@ -10,18 +10,14 @@ export interface ChunkMatch {
   chunk_index: number;
   page_number: number | null;
   content: string;
-  /** Cosine similarity to the query, from -1 to 1 (higher is closer). */
   similarity: number;
 }
 
-/** pgvector's text form: `[0.1,0.2,...]`. */
 export const toVectorLiteral = (values: number[]): string => `[${values.join(",")}]`;
 
-// Ownership is checked by the caller through the project (see SearchService).
 export class ChunkRepository {
   constructor(private readonly db: pg.Pool) {}
 
-  /** The project's chunks closest to `embedding` by cosine distance, at or above `minSimilarity`. */
   async searchByProject(
     projectId: string,
     embedding: number[],

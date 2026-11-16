@@ -8,7 +8,6 @@ import type { SearchBody } from "../validators/search.validator.js";
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
-  /** Answers a (Bangla) question from the project's documents, or "জানা নেই". */
   search = async (req: Request<Record<string, string>, unknown, SearchBody>, res: Response) => {
     const { id: ownerId } = requireUser(req);
     const { query, limit } = req.body;

@@ -9,10 +9,6 @@ type ProjectRequest = Request<Record<string, string>>;
 export class DocumentController {
   constructor(private readonly documentService: DocumentService) {}
 
-  /**
-   * OCRs the uploaded file, embeds the text as chunks and returns the processing result
-   * (document metadata), not the text. The file is not stored.
-   */
   ocr = async (req: ProjectRequest, res: Response) => {
     const { id: ownerId } = requireUser(req);
     const file = req.file;
