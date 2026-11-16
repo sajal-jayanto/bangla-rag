@@ -214,7 +214,7 @@ All `/api` routes except `/api/auth/*` need an `Authorization: Bearer <token>` h
 - **Create** (`201`) and **update** (`200`) accept only `name`, `description`, `status` and `priority`; any other field (such as `slug` or `ownerId`) is rejected with `400`. On update, send just the fields to change.
 - **Slug** — generated from the name on create, gets a `-2`, `-3`, … suffix if you already use it, and stays the same when the project is renamed.
 - **Delete** (`204`) is a soft delete: the project disappears from every endpoint, its slug can be reused, and the data stays in the database.
-- Another user's project, or a deleted one, returns `404`.
+- Another user's project, or a deleted one, returns ``.
 
 ### Upload a document — `POST /api/projects/:id/ocr`
 
@@ -262,7 +262,7 @@ curl -X POST http://localhost:3000/api/projects/5/ocr \
 - **Chunks** are up to ~1000 characters with 150 characters of overlap, split page by page at paragraph and sentence ends (`।`, `.`, `?`, `!`). Each chunk keeps its page number.
 - **`pdfInfo`** holds the PDF's own properties when set (title, subject, author, creator, producer, creation and modification dates, page size, PDF version, encrypted); `null` for images.
 - **Storage:** the file is never written anywhere. The metadata and the chunks (text + embedding) are saved in one transaction.
-- **Failures:** if OCR or embedding fails, the document is still recorded with `ocrStatus: "failed"`, the reason in `ocrError` and no chunks. Uploads rejected up front (`404`, `413`, `415`) are not recorded.
+- **Failures:** if OCR or embedding fails, the document is still recorded with `ocrStatus: "failed"`, the reason in `ocrError` and no chunks. Uploads rejected up front (``, `413`, `415`) are not recorded.
 
 | Status | When                                                                |
 | ------ | ------------------------------------------------------------------- |

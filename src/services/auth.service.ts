@@ -14,6 +14,7 @@ export interface AuthResult {
 }
 
 const SALTROUND = 12;
+const DUMMY_HASH = bcrypt.hashSync("dummy-password-for-timing", SALTROUND);
 
 export class AuthService {
   constructor(private readonly userRepository: UserRepository) {}
@@ -31,13 +32,12 @@ export class AuthService {
 
   async login({ email, password }: LoginBody): Promise<AuthResult> {
     const user = await this.userRepository.findByEmail(email);
-    if (!user) {
-      throw new HttpError(`No user found with email ${email}`, StatusCodes.NOT_FOUND);
-    }
 
-    const passwordMatches = await bcrypt.compare(password, user.password_hash);
-    if (!passwordMatches) {
-      throw new HttpError("Invalid password", StatusCodes.UNAUTHORIZED);
+    // Same error (and a bcrypt compare either way) for an unknown email and a
+    // wrong password, so the response doesn't reveal which emails are registered.
+    const passwordMatches = await bcrypt.compare(password, user?.password_hash ?? DUMMY_HASH);
+    if (!user || !passwordMatches) {
+      throw new HttpError("Invalid email or password", StatusCodes.UNAUTHORIZED);
     }
 
     return this.buildAuthResult(user);
